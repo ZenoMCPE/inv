@@ -8,7 +8,7 @@ import (
 	"unsafe"
 	_ "unsafe"
 
-	unsafe2 "github.com/bedrock-gophers/unsafe/unsafe"
+	unsafe2 "github.com/bedrock-gophers/unsafe"
 	"github.com/df-mc/dragonfly/server/world"
 
 	"github.com/df-mc/dragonfly/server/block"

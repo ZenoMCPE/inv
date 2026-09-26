@@ -74,6 +74,8 @@ func CloseContainer(p *player.Player) {
 	menuMu.Lock()
 	s := player_session(p)
 	m, ok := lastMenus[s]
+	delete(lastMenus, s)
+	menuMu.Unlock()
 	if ok {
 		if s != session.Nop {
 			if closeable, ok := m.submittable.(Closer); ok {
@@ -89,7 +91,5 @@ func CloseContainer(p *player.Player) {
 
 			removeClientSideMenu(s, p.Tx(), m)
 		}
-		delete(lastMenus, s)
 	}
-	menuMu.Unlock()
 }

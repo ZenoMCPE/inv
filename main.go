@@ -13,6 +13,7 @@ import (
 	"github.com/df-mc/dragonfly/server/item"
 	"github.com/df-mc/dragonfly/server/player"
 	"github.com/df-mc/dragonfly/server/player/chat"
+	"github.com/df-mc/dragonfly/server/world"
 )
 
 func main() {
@@ -29,6 +30,7 @@ func main() {
 	conf.ResourcesRequired = true
 
 	srv := conf.New()
+	intercept.Start(srv)
 	srv.CloseOnProgramEnd()
 
 	srv.Listen()
@@ -47,7 +49,8 @@ func (h playerHandler) HandleQuit(p *player.Player) {
 }
 
 func accept(p *player.Player) {
-	time.AfterFunc(1*time.Second, func() {
+	p.H().DoAfter(time.Second, func(_ *world.Tx, e world.Entity) {
+		p := e.(*player.Player)
 		//sub := MySubmittable{}
 
 		//var stacks = make([]item.Stack, 54)

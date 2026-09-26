@@ -84,3 +84,26 @@ forminv.SendMenu(p, m)
 ```
 
 Use `NewSlot` or `slot.At(index)` to place a slot at a specific index. Unpositioned slots fill the first open slot, and empty slots are rendered as placeholders. Use `WithSlots` when you want to bind a submitted value that is separate from the rendered button.
+
+## Read-only native chest menus (Dragonfly v0.11.5)
+
+The Zeno fork provides `inv.OpenChestMenu(p, title, stacks, keepOpen, submit)`.
+Pass exactly 27 or 54 stacks; `submit(p, slot)` receives the original slot index,
+or -1 when the client closes. Inventory transfers are rejected before Dragonfly
+processes them. Callbacks run synchronously on the player's world owner. Do not
+retain the callback player or transaction for later work.
+
+Calling OpenChestMenu again with the same size during a click refreshes the
+contents and title without reopening. Slots in keepOpen remain open; unchanged
+menus close after other actions. Use 54 slots consistently for smooth navigation.
+
+Wrap listeners with intercept.WrapListeners and call intercept.Start(server).
+Call inv.CloseChestMenu from your teleport handler and before world transfers,
+and inv.Forget from HandleQuit. For optional form presentation, register
+inv.HandleForm(p, handler) and route application form sends through inv.SendForm.
+Returning false from the handler closes the chest and sends a normal form.
+Direct Player.SendForm calls do not use this adapter.
+
+This API uses the library's version-sensitive reflection/linkname bridge to
+upstream Dragonfly internals. It requires no engine fork or additional resource
+pack; keep the pinned Dragonfly version until compatibility is verified.

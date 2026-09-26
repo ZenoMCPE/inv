@@ -1,8 +1,9 @@
 package inv
 
 import (
+	"context"
 	"github.com/bedrock-gophers/intercept/intercept"
-	"github.com/bedrock-gophers/unsafe/unsafe"
+	"github.com/bedrock-gophers/unsafe"
 	"github.com/df-mc/dragonfly/server/player"
 	"github.com/df-mc/dragonfly/server/session"
 	"github.com/df-mc/dragonfly/server/world"
@@ -19,22 +20,51 @@ type packetHandler struct{}
 
 func (h packetHandler) HandleClientPacket(ctx *intercept.Context, pk packet.Packet) {
 	switch pk.(type) {
-	case *packet.ItemStackRequest, *packet.ContainerClose:
+	case *packet.ItemStackRequest, *packet.InventoryTransaction, *packet.ContainerClose:
 	default:
 		return
 	}
 
-	ha, _ := ctx.Val().Handle()
-	ha.ExecWorld(func(tx *world.Tx, e world.Entity) {
+	ha, ok := ctx.Val().Handle()
+	if !ok {
+		return
+	}
+	_ = ha.Do(func(tx *world.Tx, e world.Entity) {
 		p := e.(*player.Player)
 		s := unsafe.Session(p)
+		if value, ok := chestSessions.Load(s); ok {
+			ctx.Cancel()
+			state := value.(*chestSession)
+			switch pkt := pk.(type) {
+			case *packet.ItemStackRequest:
+				// Reject every request, but only let the first request act on this menu.
+				for i, req := range pkt.Requests {
+					if i == 0 && state.chestMenu != nil {
+						state.handleChestRequest(req, tx, p)
+					} else {
+						session_writePacket(s, &packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{Status: protocol.ItemStackResponseStatusError, RequestID: req.RequestID}}})
+					}
+				}
+			case *packet.InventoryTransaction:
+				state.handleChestTransaction(pkt, tx, p)
+			case *packet.ContainerClose:
+				if pkt.WindowID == byte(state.openedWindowID.Load()) || pkt.WindowID == 0xff {
+					submit := state.chestMenu.submit
+					windowID := byte(state.openedWindowID.Load())
+					state.closeChestMenu(tx, true)
+					session_writePacket(s, &packet.ContainerClose{WindowID: windowID, ContainerType: protocol.ContainerTypeContainer})
+					submit(p, -1, tx)
+				}
+			}
+			return
+		}
 		switch pkt := pk.(type) {
 		case *packet.ItemStackRequest:
 			handleItemStackRequest(s, pkt.Requests)
 		case *packet.ContainerClose:
 			handleContainerClose(ctx, p, s, pkt.WindowID)
 		}
-	})
+	}).Wait(context.Background())
 }
 
 func (h packetHandler) HandleServerPacket(_ *intercept.Context, _ packet.Packet) {
@@ -46,7 +76,7 @@ func handleContainerClose(ctx *intercept.Context, p *player.Player, s *session.S
 	if !ok {
 		return
 	}
-	currentID := fetchPrivateField[atomic.Uint32](s, "openedWindowID")
+	currentID := privateFieldPointer[atomic.Uint32](s, "openedWindowID")
 	if byte(currentID.Load()) == windowID && windowID == mn.windowID {
 		closeLastMenu(p, mn)
 		return

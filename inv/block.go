@@ -10,28 +10,17 @@ import (
 	"math"
 )
 
-func init() {
-	for _, b := range []world.Block{dropper{}} {
-		if bl, ok := world.BlockByName(b.EncodeBlock()); ok {
-			hash, _ := bl.Hash()
-			if hash == math.MaxUint64 {
-				world.RegisterBlock(b)
-			}
-		}
-	}
-}
-
 type nopContainer struct{}
 
-func (nopContainer) AddViewer(block.ContainerViewer, *world.World, cube.Pos)    {}
-func (nopContainer) RemoveViewer(block.ContainerViewer, *world.World, cube.Pos) {}
+func (nopContainer) AddViewer(block.ContainerViewer, *world.Tx, cube.Pos)    {}
+func (nopContainer) RemoveViewer(block.ContainerViewer, *world.Tx, cube.Pos) {}
 func (nopContainer) Inventory() *inventory.Inventory {
 	return inventory.New(69, func(slot int, before, after item.Stack) {})
 }
 
 type dropper struct{ nopContainer }
 
-func (d dropper) Hash() (uint64, uint64) { return 932472, 932473 }
+func (d dropper) Hash() (uint64, uint64) { return math.MaxUint64, 0 }
 func (dropper) Model() world.BlockModel  { return model.Solid{} }
 func (dropper) EncodeBlock() (string, map[string]any) {
 	return "minecraft:dropper", map[string]any{"facing_direction": int32(0), "toggle_bit": false}
