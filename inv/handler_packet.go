@@ -9,6 +9,7 @@ import (
 	"github.com/df-mc/dragonfly/server/world"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
+	"log/slog"
 	"sync/atomic"
 )
 
@@ -67,8 +68,12 @@ func (h packetHandler) HandleClientPacket(ctx *intercept.Context, pk packet.Pack
 	}).Wait(context.Background())
 }
 
-func (h packetHandler) HandleServerPacket(_ *intercept.Context, _ packet.Packet) {
-	// Do nothing
+func (h packetHandler) HandleServerPacket(_ *intercept.Context, pk packet.Packet) {
+	if identifiers, ok := pk.(*packet.AvailableActorIdentifiers); ok {
+		if err := registerChestActor(identifiers); err != nil {
+			slog.Error("register chest inventory actor", "error", err)
+		}
+	}
 }
 
 func handleContainerClose(ctx *intercept.Context, p *player.Player, s *session.Session, windowID byte) {

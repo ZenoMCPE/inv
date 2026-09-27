@@ -23,6 +23,7 @@ type chestMenu struct {
 	title     string
 	keepOpen  []int
 	positions []cube.Pos
+	actorID   uint64
 	submit    func(session.Controllable, int, *world.Tx)
 }
 
@@ -30,8 +31,12 @@ type chestMenu struct {
 // All inventory transactions are rejected while it is open. Valid clicks only
 // invoke submit, synchronously in the transaction handling the click.
 func (s *chestSession) OpenChestMenu(tx *world.Tx, c session.Controllable, title string, slots []item.Stack, keepOpen []int, submit func(session.Controllable, int, *world.Tx)) {
+	if len(slots) == CompactChestSlots {
+		s.openActorChestMenu(tx, c, title, slots, keepOpen, submit)
+		return
+	}
 	if len(slots) != 27 && len(slots) != 54 {
-		panic("chest menu requires 27 or 54 slots")
+		panic("chest menu requires 27, 45 or 54 slots")
 	}
 	if current := s.chestMenu; current != nil && s.openedWindow.Load().Size() == len(slots) {
 		inv := s.openedWindow.Load()
@@ -103,6 +108,9 @@ func (s *chestSession) closeChestMenu(tx *world.Tx, clientRequested bool) {
 	chestSessions.Delete(s.Session)
 	inv := s.openedWindow.Load()
 	session_closeWindow(s.Session, clientRequested)
+	if menu.actorID != 0 {
+		s.removeChestActor(menu.actorID)
+	}
 	for _, pos := range menu.positions {
 		s.ViewBlockUpdate(pos, tx.Block(pos), 0)
 	}
@@ -187,9 +195,10 @@ func (s *chestSession) finishChestClick(tx *world.Tx, c session.Controllable, sl
 	s.closeChestMenu(tx, false)
 }
 
-// OpenChestMenu opens or refreshes a read-only 27/54-slot chest in the current
+// OpenChestMenu opens or refreshes a read-only 27/45/54-slot chest in the current
 // player transaction. Callbacks receive the original slot index. A callback
 // that opens another chest keeps the window open; terminal actions close it.
+// CompactChestSlots uses an invisible actor and requires InventoryUIResourcePack.
 func OpenChestMenu(p *player.Player, title string, slots []item.Stack, keepOpen []int, submit func(*player.Player, int)) {
 	base := player_session(p)
 	if base == session.Nop {

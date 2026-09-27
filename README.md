@@ -88,14 +88,14 @@ Use `NewSlot` or `slot.At(index)` to place a slot at a specific index. Unpositio
 ## Read-only native chest menus (Dragonfly v0.11.5)
 
 The Zeno fork provides `inv.OpenChestMenu(p, title, stacks, keepOpen, submit)`.
-Pass exactly 27 or 54 stacks; `submit(p, slot)` receives the original slot index,
+Pass exactly 27, 45 or 54 stacks; `submit(p, slot)` receives the original slot index,
 or -1 when the client closes. Inventory transfers are rejected before Dragonfly
 processes them. Callbacks run synchronously on the player's world owner. Do not
 retain the callback player or transaction for later work.
 
 Calling OpenChestMenu again with the same size during a click refreshes the
 contents and title without reopening. Slots in keepOpen remain open; unchanged
-menus close after other actions. Use 54 slots consistently for smooth navigation.
+menus close after other actions. Use the same size consistently for smooth navigation.
 
 Wrap listeners with intercept.WrapListeners and call intercept.Start(server).
 Call inv.CloseChestMenu from your teleport handler and before world transfers,
@@ -106,4 +106,20 @@ Direct Player.SendForm calls do not use this adapter.
 
 This API uses the library's version-sensitive reflection/linkname bridge to
 upstream Dragonfly internals. It requires no engine fork or additional resource
-pack; keep the pinned Dragonfly version until compatibility is verified.
+pack for 27/54 slots; keep the pinned Dragonfly version until compatibility is verified.
+
+### 45-slot actor inventory
+
+Pass `inv.CompactChestSlots` stacks to `OpenChestMenu`. This creates a real
+45-slot read-only inventory on a private invisible actor, using the method
+from [InventoryUI](https://github.com/tedo0627/InventoryUI). Install and require
+[InventoryUIResourcePack](https://github.com/tedo0627/InventoryUIResourcePack).
+The actor name uses its five-row, non-scrolling selector. The library registers
+the actor identifier through its existing intercept hook. No patched engine is
+required. The 27/54-slot paths continue to use their existing virtual blocks.
+
+Initial opens queue the actor, link, open and contents synchronously, without
+a timer or artificial delay. Refreshing preserves the window and actor; closing
+unlinks and removes the actor. Teleport and quit integrations must still call
+`CloseChestMenu` / `Forget` inside their transaction as documented above.
+The resource pack preserves native chest controls and inventory interactions.
