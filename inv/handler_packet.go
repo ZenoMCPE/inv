@@ -104,33 +104,43 @@ func handleItemStackRequest(s *session.Session, req []protocol.ItemStackRequest)
 func updateActionContainerID(action protocol.StackRequestAction, s *session.Session) {
 	switch act := action.(type) {
 	case *protocol.TakeStackRequestAction:
-		if act.Source.Container.ContainerID != act.Destination.Container.ContainerID || act.Source.Container.ContainerID == protocol.ContainerCursor || act.Source.Container.ContainerID == protocol.ContainerHotBar {
+		if act.Source.Container.ContainerID != act.Destination.Container.ContainerID || playerInventoryContainer(act.Source.Container.ContainerID) {
 			break
 		}
 		if _, ok := lastMenu(s); ok {
 			act.Source.Container.ContainerID = protocol.ContainerLevelEntity
 		}
 	case *protocol.PlaceStackRequestAction:
-		if act.Source.Container.ContainerID != act.Destination.Container.ContainerID || act.Source.Container.ContainerID == protocol.ContainerCursor || act.Source.Container.ContainerID == protocol.ContainerHotBar {
+		if act.Source.Container.ContainerID != act.Destination.Container.ContainerID || playerInventoryContainer(act.Source.Container.ContainerID) {
 			break
 		}
 		if _, ok := lastMenu(s); ok {
 			act.Source.Container.ContainerID = protocol.ContainerLevelEntity
 		}
 	case *protocol.DropStackRequestAction:
-		if act.Source.Container.ContainerID == protocol.ContainerInventory || act.Source.Container.ContainerID == protocol.ContainerCursor || act.Source.Container.ContainerID == protocol.ContainerHotBar {
+		if playerInventoryContainer(act.Source.Container.ContainerID) {
 			break
 		}
 		if _, ok := lastMenu(s); ok {
 			act.Source.Container.ContainerID = protocol.ContainerLevelEntity
-
 		}
 	case *protocol.SwapStackRequestAction:
-		if act.Source.Container.ContainerID != act.Destination.Container.ContainerID || act.Source.Container.ContainerID == protocol.ContainerCursor || act.Source.Container.ContainerID == protocol.ContainerHotBar {
+		if act.Source.Container.ContainerID != act.Destination.Container.ContainerID || playerInventoryContainer(act.Source.Container.ContainerID) {
 			break
 		}
 		if _, ok := lastMenu(s); ok {
 			act.Source.Container.ContainerID = protocol.ContainerLevelEntity
 		}
+	}
+}
+
+// Player slots keep their native IDs while a menu is open. Bedrock uses the
+// combined inventory ID for rearranging items below regular containers.
+func playerInventoryContainer(id byte) bool {
+	switch id {
+	case protocol.ContainerCursor, protocol.ContainerHotBar, protocol.ContainerInventory, protocol.ContainerCombinedHotBarAndInventory:
+		return true
+	default:
+		return false
 	}
 }
