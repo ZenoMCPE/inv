@@ -3,10 +3,8 @@ package inv
 import (
 	"github.com/df-mc/dragonfly/server/block"
 	"github.com/df-mc/dragonfly/server/player"
-	"github.com/df-mc/dragonfly/server/session"
 	"github.com/df-mc/dragonfly/server/world"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
-	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
 // Container represents a container that can be opened by a player. Containers are blocks that can store items
@@ -71,25 +69,17 @@ func (ContainerEnderChest) Size() int { return 27 }
 
 // CloseContainer closes the container that the session passed is currently viewing.
 func CloseContainer(p *player.Player) {
-	menuMu.Lock()
-	s := player_session(p)
-	m, ok := lastMenus[s]
-	delete(lastMenus, s)
-	menuMu.Unlock()
-	if ok {
-		if s != session.Nop {
-			if closeable, ok := m.submittable.(Closer); ok {
-				closeable.Close(p)
-			}
-			if m.containerClose != nil {
-				m.containerClose(m.inventory)
-			}
-			session_writePacket(s, &packet.ContainerClose{
-				WindowID:   m.windowID,
-				ServerSide: true,
-			})
-
-			removeClientSideMenu(s, p.Tx(), m)
-		}
+	if m, ok := lastMenu(player_session(p)); ok {
+		closeLastMenu(p, m, false)
 	}
+}
+
+// A close callback may open a back menu. Explicit UI transitions take ownership
+// after the callback and discard that menu without invoking closers recursively.
+func closeMenus(p *player.Player) {
+	CloseContainer(p)
+	if m, ok := lastMenu(player_session(p)); ok {
+		removeLastMenu(p, m, false)
+	}
+	CloseChestMenu(p)
 }

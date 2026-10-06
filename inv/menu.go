@@ -8,7 +8,6 @@ import (
 	"unsafe"
 	_ "unsafe"
 
-	unsafe2 "github.com/bedrock-gophers/unsafe"
 	"github.com/df-mc/dragonfly/server/world"
 
 	"github.com/df-mc/dragonfly/server/block"
@@ -35,6 +34,7 @@ type Menu struct {
 
 	windowID byte
 	custom   bool
+	openTask *world.Task
 }
 
 // NewMenu creates a new menu with the submittable passed, the name passed and the container passed.
@@ -66,7 +66,7 @@ type Closer interface {
 	Close(p *player.Player)
 }
 
-// SendMenu sends a menu to a player. The menu passed will be displayed to the player
+// SendMenu sends a menu to a player, refreshing a compatible open window in place.
 func SendMenu(p *player.Player, m Menu) {
 	sendMenu(p, m, false)
 }
@@ -79,27 +79,26 @@ func UpdateMenu(p *player.Player, m Menu) {
 // sendMenu sends the menu to a player.
 func sendMenu(p *player.Player, m Menu, update bool) {
 	s := player_session(p)
-
+	if s == session.Nop {
+		return
+	}
 	if !m.custom {
 		m.inventory.Handle(handler{menu: m})
 	}
 
 	pos := cube.PosFromVec3(p.Rotation().Vec3().Mul(-2).Add(p.Position())).Add(cube.Pos{0, 2, 0})
-	blockPos := blockPosToProtocol(pos)
-
 	var nextID byte
-	if update {
-		mn, ok := lastMenu(s)
-		if ok {
-			pos = mn.pos
-			nextID = mn.windowID
-		}
+	current, exists := lastMenu(s)
+	refresh := exists && menuActive(s, current) && current.container.Type() == m.container.Type() && current.container.Size() == m.container.Size() && (update || !current.custom && !m.custom)
+	if refresh {
+		pos, nextID, m.openTask = current.pos, current.windowID, current.openTask
 	} else {
-		if m, ok := lastMenu(s); ok && m.pos != pos {
-			closeLastMenu(p, m)
-		}
+		closeMenus(p)
+		session_closeCurrentContainer(s, p.Tx(), false)
+		p.MoveItemsToInventory()
 		nextID = session_nextWindowID(s)
 	}
+	blockPos := blockPosToProtocol(pos)
 
 	s.ViewBlockUpdate(pos, m.container.Block(), 0)
 	s.ViewBlockUpdate(pos.Add(cube.Pos{0, 1}), block.Air{}, 0)
@@ -119,39 +118,36 @@ func sendMenu(p *player.Player, m Menu, update bool) {
 		NBTData:  data,
 	})
 
-	posPtr := atomic.Pointer[cube.Pos]{}
-	invPtr := atomic.Pointer[inventory.Inventory]{}
-	containerOpenedPtr := atomic.Bool{}
-	openedContainerIdPtr := atomic.Uint32{}
-	openedWindowIdPtr := atomic.Uint32{}
+	privateFieldPointer[atomic.Pointer[cube.Pos]](s, "openedPos").Store(&pos)
+	privateFieldPointer[atomic.Pointer[inventory.Inventory]](s, "openedWindow").Store(m.inventory)
+	privateFieldPointer[atomic.Bool](s, "containerOpened").Store(true)
+	privateFieldPointer[atomic.Uint32](s, "openedContainerID").Store(uint32(m.container.Type()))
 
-	posPtr.Store(&pos)
-	invPtr.Store(m.inventory)
-	containerOpenedPtr.Store(true)
-	openedContainerIdPtr.Store(uint32(nextID))
-	openedWindowIdPtr.Store(uint32(nextID))
-
-	updatePrivateField(s, "openedPos", posPtr)
-	updatePrivateField(s, "openedWindow", invPtr)
-
-	updatePrivateField(s, "containerOpened", containerOpenedPtr)
-	updatePrivateField(s, "openedContainerID", openedContainerIdPtr)
-	updatePrivateField(s, "openedWindowID", openedWindowIdPtr)
-
-	if !update {
-		time.AfterFunc(time.Millisecond*500, func() {
+	if !refresh {
+		var task *world.Task
+		task = p.H().DoAfter(time.Millisecond*500, func(_ *world.Tx, e world.Entity) {
+			if player_session(e.(*player.Player)) != s {
+				return
+			}
+			current, ok := lastMenu(s)
+			if !ok || current.openTask != task || !menuActive(s, current) {
+				return
+			}
+			current.openTask = nil
+			menuMu.Lock()
+			lastMenus[s] = current
+			menuMu.Unlock()
 			session_writePacket(s, &packet.ContainerOpen{
-				WindowID:                nextID,
-				ContainerPosition:       blockPos,
-				ContainerType:           byte(m.container.Type()),
+				WindowID:                current.windowID,
+				ContainerPosition:       blockPosToProtocol(current.pos),
+				ContainerType:           byte(current.container.Type()),
 				ContainerEntityUniqueID: -1,
 			})
-			session_sendInv(s, m.inventory, uint32(nextID))
+			session_sendInv(s, current.inventory, uint32(current.windowID))
 		})
-	} else {
-		for i, it := range m.inventory.Items() {
-			session_sendItem(s, it, i, uint32(nextID))
-		}
+		m.openTask = task
+	} else if m.openTask == nil {
+		session_sendInv(s, m.inventory, uint32(nextID))
 	}
 
 	m.pos = pos
@@ -174,21 +170,39 @@ func lastMenu(s *session.Session) (Menu, bool) {
 	return m, ok
 }
 
-func closeLastMenu(p *player.Player, mn Menu) {
-	s := unsafe2.Session(p)
-	if s != session.Nop {
-		if closeable, ok := mn.submittable.(Closer); ok {
-			closeable.Close(p)
-		}
-		if mn.containerClose != nil {
-			mn.containerClose(mn.inventory)
-		}
-		removeClientSideMenu(s, p.Tx(), mn)
-	}
+func menuActive(s *session.Session, m Menu) bool {
+	return privateFieldPointer[atomic.Bool](s, "containerOpened").Load() &&
+		privateFieldPointer[atomic.Pointer[inventory.Inventory]](s, "openedWindow").Load() == m.inventory &&
+		byte(privateFieldPointer[atomic.Uint32](s, "openedWindowID").Load()) == m.windowID
+}
 
+func closeLastMenu(p *player.Player, mn Menu, clientRequested bool) {
+	removeLastMenu(p, mn, clientRequested)
+	if player_session(p) == session.Nop {
+		return
+	}
+	if closeable, ok := mn.submittable.(Closer); ok {
+		closeable.Close(p)
+	}
+	if mn.containerClose != nil {
+		mn.containerClose(mn.inventory)
+	}
+}
+
+func removeLastMenu(p *player.Player, mn Menu, clientRequested bool) {
+	s := player_session(p)
 	menuMu.Lock()
 	delete(lastMenus, s)
 	menuMu.Unlock()
+	if mn.openTask != nil {
+		mn.openTask.Cancel()
+	}
+	if s != session.Nop {
+		if menuActive(s, mn) {
+			session_closeWindow(s, clientRequested)
+		}
+		removeClientSideMenu(s, p.Tx(), mn)
+	}
 }
 
 func removeClientSideMenu(s *session.Session, tx *world.Tx, m Menu) {
@@ -196,7 +210,8 @@ func removeClientSideMenu(s *session.Session, tx *world.Tx, m Menu) {
 	airPos := m.pos.Add(cube.Pos{0, 1})
 	s.ViewBlockUpdate(airPos, tx.Block(airPos), 0)
 	if c, ok := m.container.(ContainerChest); ok && c.DoubleChest {
-		s.ViewBlockUpdate(m.pos.Add(cube.Pos{1, 0, 0}), tx.Block(m.pos), 0)
+		pairPos := m.pos.Add(cube.Pos{1, 0, 0})
+		s.ViewBlockUpdate(pairPos, tx.Block(pairPos), 0)
 		airPos = m.pos.Add(cube.Pos{1, 1})
 		s.ViewBlockUpdate(airPos, tx.Block(airPos), 0)
 	}
@@ -221,16 +236,6 @@ func createFakeInventoryNBT(name string, container Container) map[string]interfa
 		panic("should never happen")
 	}
 	return m
-}
-
-// updatePrivateField sets a private field of a session to the value passed.
-func updatePrivateField[T any](s *session.Session, name string, value T) {
-	reflectedValue := reflect.ValueOf(s).Elem()
-	privateFieldValue := reflectedValue.FieldByName(name)
-
-	privateFieldValue = reflect.NewAt(privateFieldValue.Type(), unsafe.Pointer(privateFieldValue.UnsafeAddr())).Elem()
-
-	privateFieldValue.Set(reflect.ValueOf(value))
 }
 
 // fetchPrivateField fetches a private field of a session.
@@ -261,8 +266,3 @@ func session_nextWindowID(*session.Session) byte
 //
 //go:linkname session_sendInv github.com/df-mc/dragonfly/server/session.(*Session).sendInv
 func session_sendInv(*session.Session, *inventory.Inventory, uint32)
-
-// noinspection ALL
-//
-//go:linkname session_sendItem github.com/df-mc/dragonfly/server/session.(*Session).sendItem
-func session_sendItem(*session.Session, item.Stack, int, uint32)

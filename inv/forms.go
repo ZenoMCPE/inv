@@ -22,14 +22,13 @@ func SendForm(submitter form.Submitter, f form.Form) {
 		if handler, exists := formHandlers.Load(player_session(p)); exists && handler.(func(*player.Player, form.Form) bool)(p, f) {
 			return
 		}
-		CloseChestMenu(p)
+		closeMenus(p)
 	}
 	submitter.SendForm(f)
 }
 
 // Forget must be called from HandleQuit to release per-player state.
 func Forget(p *player.Player) {
-	CloseChestMenu(p)
-	CloseContainer(p)
+	closeMenus(p)
 	formHandlers.Delete(player_session(p))
 }

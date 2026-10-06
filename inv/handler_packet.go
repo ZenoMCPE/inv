@@ -10,7 +10,6 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"log/slog"
-	"sync/atomic"
 )
 
 func init() {
@@ -63,7 +62,7 @@ func (h packetHandler) HandleClientPacket(ctx *intercept.Context, pk packet.Pack
 		case *packet.ItemStackRequest:
 			handleItemStackRequest(s, pkt.Requests)
 		case *packet.ContainerClose:
-			handleContainerClose(ctx, p, s, pkt.WindowID)
+			handleContainerClose(ctx, p, s, pkt)
 		}
 	}).Wait(context.Background())
 }
@@ -76,19 +75,24 @@ func (h packetHandler) HandleServerPacket(_ *intercept.Context, pk packet.Packet
 	}
 }
 
-func handleContainerClose(ctx *intercept.Context, p *player.Player, s *session.Session, windowID byte) {
+func handleContainerClose(ctx *intercept.Context, p *player.Player, s *session.Session, pk *packet.ContainerClose) {
 	mn, ok := lastMenu(s)
 	if !ok {
 		return
 	}
-	currentID := privateFieldPointer[atomic.Uint32](s, "openedWindowID")
-	if byte(currentID.Load()) == windowID && windowID == mn.windowID {
-		closeLastMenu(p, mn)
+	if !menuActive(s, mn) {
+		closeLastMenu(p, mn, true)
 		return
 	}
 	ctx.Cancel()
-	p.OpenBlockContainer(mn.pos, p.Tx())
-	closeLastMenu(p, mn)
+	windowID, containerType := pk.WindowID, pk.ContainerType
+	if pk.WindowID == mn.windowID || pk.WindowID == 0xff {
+		windowID, containerType = mn.windowID, byte(mn.container.Type())
+		p.MoveItemsToInventory()
+		closeLastMenu(p, mn, true)
+	}
+	// An acknowledgement for an older window must not close its replacement.
+	session_writePacket(s, &packet.ContainerClose{WindowID: windowID, ContainerType: containerType})
 }
 
 func handleItemStackRequest(s *session.Session, req []protocol.ItemStackRequest) {
