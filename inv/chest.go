@@ -38,7 +38,7 @@ func (s *chestSession) OpenChestMenu(tx *world.Tx, c session.Controllable, title
 	if len(slots) != 27 && len(slots) != 54 {
 		panic("chest menu requires 27, 45 or 54 slots")
 	}
-	if current := s.chestMenu; current != nil && s.openedWindow.Load().Size() == len(slots) {
+	if current := s.chestMenu; current != nil && current.actorID == 0 && s.openedWindow.Load().Size() == len(slots) {
 		inv := s.openedWindow.Load()
 		for slot, stack := range slots {
 			_ = inv.SetItem(slot, stack)
@@ -206,6 +206,18 @@ func OpenChestMenu(p *player.Player, title string, slots []item.Stack, keepOpen 
 	}
 	state := chestState(base)
 	state.OpenChestMenu(p.Tx(), p, title, slots, keepOpen, func(c session.Controllable, slot int, _ *world.Tx) { submit(c.(*player.Player), slot) })
+}
+
+// OpenActorChestMenu opens or refreshes a read-only 45/54-slot chest backed by
+// an invisible inventory actor. Updating a menu of the same size keeps the
+// window open and updates its title through actor metadata.
+func OpenActorChestMenu(p *player.Player, title string, slots []item.Stack, keepOpen []int, submit func(*player.Player, int)) {
+	base := player_session(p)
+	if base == session.Nop {
+		return
+	}
+	state := chestState(base)
+	state.openActorChestMenu(p.Tx(), p, title, slots, keepOpen, func(c session.Controllable, slot int, _ *world.Tx) { submit(c.(*player.Player), slot) })
 }
 
 // CloseChestMenu closes a virtual chest before teleporting, changing worlds,

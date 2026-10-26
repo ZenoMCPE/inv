@@ -26,7 +26,11 @@ const chestActorType = "inventoryui:inventoryui"
 const compactChestTitlePrefix = "§5§0§r§r§r§r§r§r§r§r§r"
 
 func (s *chestSession) openActorChestMenu(tx *world.Tx, c session.Controllable, title string, slots []item.Stack, keepOpen []int, submit func(session.Controllable, int, *world.Tx)) {
-	if current := s.chestMenu; current != nil && current.actorID != 0 {
+	if len(slots) != CompactChestSlots && len(slots) != 54 {
+		panic("actor chest menu requires 45 or 54 slots")
+	}
+	title = actorChestTitle(title, len(slots))
+	if current := s.chestMenu; current != nil && current.actorID != 0 && s.openedWindow.Load().Size() == len(slots) {
 		inv := s.openedWindow.Load()
 		for slot, stack := range slots {
 			_ = inv.SetItem(slot, stack)
@@ -34,7 +38,7 @@ func (s *chestSession) openActorChestMenu(tx *world.Tx, c session.Controllable, 
 		s.chestMenu = &chestMenu{title: title, actorID: current.actorID, keepOpen: slices.Clone(keepOpen), submit: submit}
 		if current.title != title {
 			session_writePacket(s.Session, &packet.SetActorData{EntityRuntimeID: current.actorID, EntityMetadata: protocol.EntityMetadata{
-				protocol.EntityDataKeyName: compactChestTitlePrefix + title,
+				protocol.EntityDataKeyName: title,
 			}})
 		}
 		session_sendInv(s.Session, inv, s.openedWindowID.Load())
@@ -46,7 +50,7 @@ func (s *chestSession) openActorChestMenu(tx *world.Tx, c session.Controllable, 
 	session_closeCurrentContainer(s.Session, tx, false)
 	c.MoveItemsToInventory()
 
-	inv := inventory.New(CompactChestSlots, nil)
+	inv := inventory.New(len(slots), nil)
 	for slot, stack := range slots {
 		_ = inv.SetItem(slot, stack)
 	}
@@ -60,9 +64,9 @@ func (s *chestSession) openActorChestMenu(tx *world.Tx, c session.Controllable, 
 	s.chestMenu = &chestMenu{title: title, actorID: actorID, keepOpen: slices.Clone(keepOpen), submit: submit}
 
 	metadata := protocol.NewEntityMetadata()
-	metadata[protocol.EntityDataKeyName] = compactChestTitlePrefix + title
+	metadata[protocol.EntityDataKeyName] = title
 	metadata[protocol.EntityDataKeyContainerType] = byte(protocol.ContainerTypeContainer)
-	metadata[protocol.EntityDataKeyContainerSize] = int32(CompactChestSlots)
+	metadata[protocol.EntityDataKeyContainerSize] = int32(len(slots))
 	metadata[protocol.EntityDataKeyScale] = float32(0)
 	metadata[protocol.EntityDataKeyWidth] = float32(0)
 	metadata[protocol.EntityDataKeyHeight] = float32(0)
@@ -85,6 +89,13 @@ func (s *chestSession) openActorChestMenu(tx *world.Tx, c session.Controllable, 
 		ContainerPosition: protocol.BlockPos{int32(pos[0]), int32(pos[1]), int32(pos[2])}, ContainerEntityUniqueID: int64(actorID),
 	})
 	session_sendInv(s.Session, inv, uint32(windowID))
+}
+
+func actorChestTitle(title string, slots int) string {
+	if slots == CompactChestSlots {
+		return compactChestTitlePrefix + title
+	}
+	return title
 }
 
 func (s *chestSession) nextChestActorID() uint64 {
