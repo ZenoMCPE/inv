@@ -22,8 +22,12 @@ const CompactChestSlots = 45
 
 const chestActorType = "inventoryui:inventoryui"
 
-// The prefix is InventoryUIResourcePack's five-row, non-scrolling selector.
-const compactChestTitlePrefix = "§5§0§r§r§r§r§r§r§r§r§r"
+// These prefixes select InventoryUIResourcePack's non-scrolling five- and
+// six-row layouts for actor-backed containers.
+const (
+	compactChestTitlePrefix = "§5§0§r§r§r§r§r§r§r§r§r"
+	largeChestTitlePrefix   = "§6§0§r§r§r§r§r§r§r§r§r"
+)
 
 func (s *chestSession) openActorChestMenu(tx *world.Tx, c session.Controllable, title string, slots []item.Stack, keepOpen []int, submit func(session.Controllable, int, *world.Tx)) {
 	if len(slots) != CompactChestSlots && len(slots) != 54 {
@@ -95,7 +99,7 @@ func actorChestTitle(title string, slots int) string {
 	if slots == CompactChestSlots {
 		return compactChestTitlePrefix + title
 	}
-	return title
+	return largeChestTitlePrefix + title
 }
 
 func (s *chestSession) nextChestActorID() uint64 {
