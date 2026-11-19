@@ -32,6 +32,9 @@ type chestMenu struct {
 // All inventory transactions are rejected while it is open. Valid clicks only
 // invoke submit, synchronously in the transaction handling the click.
 func (s *chestSession) OpenChestMenu(tx *world.Tx, c session.Controllable, title string, slots []item.Stack, keepOpen []int, submit func(session.Controllable, int, *world.Tx)) {
+	if s.chestMenu != nil && s.chestMenu.editable != nil {
+		s.closeChestMenu(tx, false)
+	}
 	if len(slots) == CompactChestSlots {
 		s.openActorChestMenu(tx, c, title, slots, keepOpen, submit)
 		return
@@ -105,6 +108,18 @@ func (s *chestSession) CloseChestMenu(tx *world.Tx) {
 
 func (s *chestSession) closeChestMenu(tx *world.Tx, clientRequested bool) {
 	menu := s.chestMenu
+	if menu.editable != nil {
+		// Cursor contents are authoritative transfers, not virtual display copies.
+		// Keep overflow in UI rather than dropping through a host handler that may
+		// cancel the drop. Ordinary read-only menus never enter this path.
+		for slot, stack := range s.ui.Slots() {
+			if stack.Empty() {
+				continue
+			}
+			n, _ := s.inv.AddItem(stack)
+			_ = s.ui.SetItem(slot, stack.Grow(-n))
+		}
+	}
 	s.chestMenu = nil
 	chestSessions.Delete(s.Session)
 	inv := s.openedWindow.Load()
