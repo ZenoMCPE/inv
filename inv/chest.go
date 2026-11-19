@@ -20,6 +20,7 @@ import (
 )
 
 type chestMenu struct {
+	editable  *editableMenu
 	title     string
 	keepOpen  []int
 	positions []cube.Pos

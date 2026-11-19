@@ -37,6 +37,15 @@ func (h packetHandler) HandleClientPacket(ctx *intercept.Context, pk packet.Pack
 			state := value.(*chestSession)
 			switch pkt := pk.(type) {
 			case *packet.ItemStackRequest:
+				if state.chestMenu != nil && state.chestMenu.editable != nil {
+					for _, req := range pkt.Requests {
+						if state.chestMenu == nil {
+							break
+						}
+						state.handleEditableRequest(p, req)
+					}
+					return
+				}
 				// Reject every request, but only let the first request act on this menu.
 				for i, req := range pkt.Requests {
 					if i == 0 && state.chestMenu != nil {
@@ -46,6 +55,11 @@ func (h packetHandler) HandleClientPacket(ctx *intercept.Context, pk packet.Pack
 					}
 				}
 			case *packet.InventoryTransaction:
+				if state.chestMenu != nil && state.chestMenu.editable != nil {
+					session_sendInv(s, state.openedWindow.Load(), state.openedWindowID.Load())
+					session_sendInv(s, state.inv, protocol.WindowIDInventory)
+					return
+				}
 				state.handleChestTransaction(pkt, tx, p)
 			case *packet.ContainerClose:
 				if pkt.WindowID == byte(state.openedWindowID.Load()) || pkt.WindowID == 0xff {
