@@ -219,6 +219,34 @@ func (s *chestSession) handleEditableRequest(p *player.Player, req protocol.Item
 			return
 		}
 	}
+	// Reserve enough personal inventory space to settle the cursor on close.
+	// This prevents a full viewer inventory from stranding transferred items in
+	// temporary UI slots (host drop handlers may refuse vanilla overflow drops).
+	cursor, _ := s.ui.Item(0)
+	personal := s.inv.Slots()
+	for _, cell := range cells {
+		if cell.inv == s.ui && cell.slot == 0 {
+			cursor = cell.after
+		}
+		if cell.inv == s.inv {
+			personal[cell.slot] = cell.after
+		}
+	}
+	remaining := cursor.Count()
+	for _, stack := range personal {
+		if cursor.Empty() {
+			break
+		}
+		if stack.Empty() {
+			remaining -= cursor.MaxCount()
+		} else if cursor.Comparable(stack) {
+			remaining -= max(0, stack.MaxCount()-stack.Count())
+		}
+	}
+	if remaining > 0 {
+		s.rejectEditable(req.RequestID)
+		return
+	}
 	// All authoritative inventories belong to p.Tx(); no other transaction may
 	// interleave between this validation and commit. No inventory handlers are
 	// bypassed implicitly: the source explicitly authorizes these server writes.
