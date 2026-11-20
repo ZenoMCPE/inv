@@ -12,6 +12,7 @@ import (
 	"github.com/df-mc/dragonfly/server/session"
 	"github.com/df-mc/dragonfly/server/world"
 	"github.com/go-gl/mathgl/mgl32"
+	"github.com/go-gl/mathgl/mgl64"
 	"github.com/sandertv/gophertunnel/minecraft/nbt"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
@@ -67,26 +68,7 @@ func (s *chestSession) openActorChestMenu(tx *world.Tx, c session.Controllable, 
 	s.openedPos.Store(&pos)
 	s.chestMenu = &chestMenu{title: title, actorID: actorID, keepOpen: slices.Clone(keepOpen), submit: submit}
 
-	metadata := protocol.NewEntityMetadata()
-	metadata[protocol.EntityDataKeyName] = title
-	metadata[protocol.EntityDataKeyContainerType] = byte(protocol.ContainerTypeContainer)
-	metadata[protocol.EntityDataKeyContainerSize] = int32(len(slots))
-	metadata[protocol.EntityDataKeyScale] = float32(0)
-	metadata[protocol.EntityDataKeyWidth] = float32(0)
-	metadata[protocol.EntityDataKeyHeight] = float32(0)
-	metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagInvisible)
-	metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagNoAI)
-	metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagSilent)
-	position := c.Position()
-	session_writePacket(s.Session, &packet.AddActor{
-		EntityUniqueID: int64(actorID), EntityRuntimeID: actorID, EntityType: chestActorType,
-		Position: mgl32.Vec3{float32(position[0]), float32(position[1]), float32(position[2])}, EntityMetadata: metadata,
-	})
-	// InventoryUI attaches its invisible inventory actor to the player, whose
-	// runtime/unique ID is always 1 in their own Dragonfly session.
-	session_writePacket(s.Session, &packet.SetActorLink{EntityLink: protocol.EntityLink{
-		RiddenEntityUniqueID: 1, RiderEntityUniqueID: int64(actorID), Type: protocol.EntityLinkRider, Immediate: true, RiderInitiated: true,
-	}})
+	spawnContainerActor(s.Session, actorID, c.Position(), title, byte(protocol.ContainerTypeContainer), len(slots))
 	// Queue the open and contents immediately after spawning/linking the actor.
 	session_writePacket(s.Session, &packet.ContainerOpen{
 		WindowID: windowID, ContainerType: protocol.ContainerTypeContainer,
@@ -102,21 +84,48 @@ func actorChestTitle(title string, slots int) string {
 	return largeChestTitlePrefix + title
 }
 
-func (s *chestSession) nextChestActorID() uint64 {
-	// Share Dragonfly's allocator to avoid collisions with visible world actors.
-	mu := privateFieldPointer[sync.RWMutex](s.Session, "entityMutex")
+func (s *chestSession) nextChestActorID() uint64 { return nextActorID(s.Session) }
+
+func (s *chestSession) removeChestActor(actorID uint64) { removeActor(s.Session, actorID) }
+
+// nextActorID shares Dragonfly's allocator to avoid collisions with visible world actors.
+func nextActorID(s *session.Session) uint64 {
+	mu := privateFieldPointer[sync.RWMutex](s, "entityMutex")
 	mu.Lock()
 	defer mu.Unlock()
-	next := privateFieldPointer[uint64](s.Session, "currentEntityRuntimeID")
+	next := privateFieldPointer[uint64](s, "currentEntityRuntimeID")
 	*next++
 	return *next
 }
 
-func (s *chestSession) removeChestActor(actorID uint64) {
-	session_writePacket(s.Session, &packet.SetActorLink{EntityLink: protocol.EntityLink{
+// spawnContainerActor spawns the invisible inventory actor that holds a container of the type and size passed.
+func spawnContainerActor(s *session.Session, actorID uint64, position mgl64.Vec3, title string, containerType byte, size int) {
+	metadata := protocol.NewEntityMetadata()
+	metadata[protocol.EntityDataKeyName] = title
+	metadata[protocol.EntityDataKeyContainerType] = containerType
+	metadata[protocol.EntityDataKeyContainerSize] = int32(size)
+	metadata[protocol.EntityDataKeyScale] = float32(0)
+	metadata[protocol.EntityDataKeyWidth] = float32(0)
+	metadata[protocol.EntityDataKeyHeight] = float32(0)
+	metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagInvisible)
+	metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagNoAI)
+	metadata.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagSilent)
+	session_writePacket(s, &packet.AddActor{
+		EntityUniqueID: int64(actorID), EntityRuntimeID: actorID, EntityType: chestActorType,
+		Position: mgl32.Vec3{float32(position[0]), float32(position[1]), float32(position[2])}, EntityMetadata: metadata,
+	})
+	// InventoryUI attaches its invisible inventory actor to the player, whose
+	// runtime/unique ID is always 1 in their own Dragonfly session.
+	session_writePacket(s, &packet.SetActorLink{EntityLink: protocol.EntityLink{
+		RiddenEntityUniqueID: 1, RiderEntityUniqueID: int64(actorID), Type: protocol.EntityLinkRider, Immediate: true, RiderInitiated: true,
+	}})
+}
+
+func removeActor(s *session.Session, actorID uint64) {
+	session_writePacket(s, &packet.SetActorLink{EntityLink: protocol.EntityLink{
 		RiddenEntityUniqueID: 1, RiderEntityUniqueID: int64(actorID), Type: protocol.EntityLinkRemove, Immediate: true,
 	}})
-	session_writePacket(s.Session, &packet.RemoveActor{EntityUniqueID: int64(actorID)})
+	session_writePacket(s, &packet.RemoveActor{EntityUniqueID: int64(actorID)})
 }
 
 func registerChestActor(pk *packet.AvailableActorIdentifiers) error {

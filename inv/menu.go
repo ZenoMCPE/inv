@@ -35,6 +35,10 @@ type Menu struct {
 	windowID byte
 	custom   bool
 	openTask *world.Task
+
+	// actor opens the menu through an invisible actor instead of a placed block.
+	actor   bool
+	actorID uint64
 }
 
 // NewMenu creates a new menu with the submittable passed, the name passed and the container passed.
@@ -45,6 +49,16 @@ func NewMenu(submittable Submittable, name string, container Container) Menu {
 // NewCustomMenu creates a new menu with the name, container and inventory.
 func NewCustomMenu(name string, container Container, inv *inventory.Inventory, containerClose func(inv *inventory.Inventory)) Menu {
 	return Menu{name: name, container: container, inventory: inv, containerClose: containerClose, custom: true}
+}
+
+// WithActor returns a copy of the menu that opens through an invisible actor attached to the player, like the
+// five- and six-row chest menus, instead of a container block placed near the player. The client then opens it in
+// the same tick, while a block menu waits for the client to load the block first. Its container type and size are
+// sent as the actor's, so any container works, and items move through the same requests as in a block menu. The
+// actor uses InventoryUIResourcePack's invisible inventory entity.
+func (m Menu) WithActor() Menu {
+	m.actor = true
+	return m
 }
 
 // WithStacks sets the stacks of the menu to the stacks passed.
@@ -89,14 +103,18 @@ func sendMenu(p *player.Player, m Menu, update bool) {
 	pos := cube.PosFromVec3(p.Rotation().Vec3().Mul(-2).Add(p.Position())).Add(cube.Pos{0, 2, 0})
 	var nextID byte
 	current, exists := lastMenu(s)
-	refresh := exists && menuActive(s, current) && current.container.Type() == m.container.Type() && current.container.Size() == m.container.Size() && (update || !current.custom && !m.custom)
+	refresh := exists && menuActive(s, current) && current.container.Type() == m.container.Type() && current.container.Size() == m.container.Size() && current.actor == m.actor && (update || !current.custom && !m.custom)
 	if refresh {
-		pos, nextID, m.openTask = current.pos, current.windowID, current.openTask
+		pos, nextID, m.openTask, m.actorID = current.pos, current.windowID, current.openTask, current.actorID
 	} else {
 		closeMenus(p)
 		session_closeCurrentContainer(s, p.Tx(), false)
 		p.MoveItemsToInventory()
 		nextID = session_nextWindowID(s)
+	}
+	if m.actor {
+		sendActorMenu(s, p, m, current, refresh, nextID)
+		return
 	}
 	blockPos := blockPosToProtocol(pos)
 
@@ -205,7 +223,45 @@ func removeLastMenu(p *player.Player, mn Menu, clientRequested bool) {
 	}
 }
 
+// sendActorMenu opens or refreshes a menu made with WithActor. The open and the contents follow the actor at once.
+func sendActorMenu(s *session.Session, p *player.Player, m Menu, current Menu, refresh bool, windowID byte) {
+	if refresh {
+		m.pos = current.pos
+		if current.name != m.name {
+			session_writePacket(s, &packet.SetActorData{EntityRuntimeID: m.actorID, EntityMetadata: protocol.EntityMetadata{
+				protocol.EntityDataKeyName: m.name,
+			}})
+		}
+	} else {
+		m.actorID = nextActorID(s)
+		m.pos = cube.PosFromVec3(p.Position())
+		spawnContainerActor(s, m.actorID, p.Position(), m.name, byte(m.container.Type()), m.container.Size())
+	}
+	privateFieldPointer[atomic.Pointer[cube.Pos]](s, "openedPos").Store(&m.pos)
+	privateFieldPointer[atomic.Pointer[inventory.Inventory]](s, "openedWindow").Store(m.inventory)
+	privateFieldPointer[atomic.Bool](s, "containerOpened").Store(true)
+	privateFieldPointer[atomic.Uint32](s, "openedContainerID").Store(uint32(m.container.Type()))
+	if !refresh {
+		session_writePacket(s, &packet.ContainerOpen{
+			WindowID: windowID, ContainerType: byte(m.container.Type()),
+			ContainerPosition: blockPosToProtocol(m.pos), ContainerEntityUniqueID: int64(m.actorID),
+		})
+	}
+	session_sendInv(s, m.inventory, uint32(windowID))
+
+	m.windowID = windowID
+	menuMu.Lock()
+	lastMenus[s] = m
+	menuMu.Unlock()
+}
+
 func removeClientSideMenu(s *session.Session, tx *world.Tx, m Menu) {
+	if m.actor {
+		if m.actorID != 0 {
+			removeActor(s, m.actorID)
+		}
+		return
+	}
 	s.ViewBlockUpdate(m.pos, tx.Block(m.pos), 0)
 	airPos := m.pos.Add(cube.Pos{0, 1})
 	s.ViewBlockUpdate(airPos, tx.Block(airPos), 0)
