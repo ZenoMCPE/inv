@@ -77,9 +77,15 @@ func CloseContainer(p *player.Player) {
 // A close callback may open a back menu. Explicit UI transitions take ownership
 // after the callback and discard that menu without invoking closers recursively.
 func closeMenus(p *player.Player) {
+	closeCustomMenu(p)
+	CloseChestMenu(p)
+}
+
+// closeCustomMenu closes the open custom menu, if any, and discards a menu its close callback opened in its place,
+// including that menu's actor.
+func closeCustomMenu(p *player.Player) {
 	CloseContainer(p)
 	if m, ok := lastMenu(player_session(p)); ok {
 		removeLastMenu(p, m, false)
 	}
-	CloseChestMenu(p)
 }

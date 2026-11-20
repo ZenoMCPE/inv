@@ -56,8 +56,14 @@ func NewCustomMenu(name string, container Container, inv *inventory.Inventory, c
 // the same tick, while a block menu waits for the client to load the block first. Its container type and size are
 // sent as the actor's, so any container works, and items move through the same requests as in a block menu. The
 // actor uses InventoryUIResourcePack's invisible inventory entity.
+//
+// Only chests and hoppers open through an actor, as minecarts do. The client opens other containers, such as
+// droppers, only at a block, so WithActor leaves those menus unchanged.
 func (m Menu) WithActor() Menu {
-	m.actor = true
+	switch m.container.Type() {
+	case protocol.ContainerTypeContainer, protocol.ContainerTypeHopper:
+		m.actor = true
+	}
 	return m
 }
 
@@ -234,7 +240,10 @@ func sendActorMenu(s *session.Session, p *player.Player, m Menu, current Menu, r
 		}
 	} else {
 		m.actorID = nextActorID(s)
+		// The window has no block. A position below the world is never a real container, so a native
+		// container the server opens later is never mistaken for this window.
 		m.pos = cube.PosFromVec3(p.Position())
+		m.pos[1] = p.Tx().Range()[0] - 1
 		spawnContainerActor(s, m.actorID, p.Position(), m.name, byte(m.container.Type()), m.container.Size())
 	}
 	privateFieldPointer[atomic.Pointer[cube.Pos]](s, "openedPos").Store(&m.pos)

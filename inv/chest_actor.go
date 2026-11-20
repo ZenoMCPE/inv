@@ -51,7 +51,7 @@ func (s *chestSession) openActorChestMenu(tx *world.Tx, c session.Controllable, 
 	}
 	s.CloseChestMenu(tx)
 	chestSessions.Store(s.Session, s)
-	CloseContainer(c.(*player.Player))
+	closeCustomMenu(c.(*player.Player))
 	session_closeCurrentContainer(s.Session, tx, false)
 	c.MoveItemsToInventory()
 
