@@ -53,12 +53,12 @@ func NewCustomMenu(name string, container Container, inv *inventory.Inventory, c
 
 // WithActor returns a copy of the menu that opens through an invisible actor attached to the player, like the
 // five- and six-row chest menus, instead of a container block placed near the player. The client then opens it in
-// the same tick, while a block menu waits for the client to load the block first. Its container type and size are
-// sent as the actor's, so any container works, and items move through the same requests as in a block menu. The
-// actor uses InventoryUIResourcePack's invisible inventory entity.
+// the same tick, while a block menu waits for the client to load the block first. The menu's container type and size
+// are sent as the actor's, and items move through the same requests as in a block menu. The actor uses
+// InventoryUIResourcePack's invisible inventory entity.
 //
 // Only chests and hoppers open through an actor, as minecarts do. The client opens other containers, such as
-// droppers, only at a block, so WithActor leaves those menus unchanged.
+// droppers, only at a block, so WithActor leaves those menus unchanged and they still open after the delay.
 func (m Menu) WithActor() Menu {
 	switch m.container.Type() {
 	case protocol.ContainerTypeContainer, protocol.ContainerTypeHopper:
