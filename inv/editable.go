@@ -119,6 +119,7 @@ func scheduleEditableRefresh(handle *world.EntityHandle, original *session.Sessi
 }
 
 type editableCell struct {
+	predicted      bool
 	inv            *inventory.Inventory
 	slot, menuSlot int
 	before, after  item.Stack
@@ -191,6 +192,9 @@ func (s *chestSession) handleEditableRequest(p *player.Player, req protocol.Item
 			cells[key] = cell
 		}
 		id := info.StackNetworkID
+		if id < 0 && id == req.RequestID && cell.predicted {
+			return cell, true
+		}
 		if id < 0 {
 			previous, exists := menu.receipts[id]
 			if !exists {
@@ -329,6 +333,7 @@ func planEditable(req protocol.ItemStackRequest, get func(protocol.StackRequestS
 		}
 		if swap {
 			source.after, destination.after = destination.after, source.after
+			source.predicted, destination.predicted = true, true
 			continue
 		}
 		if count == 0 || source.after.Empty() || int(count) > source.after.Count() || (!destination.after.Empty() && !source.after.Comparable(destination.after)) {
@@ -343,6 +348,7 @@ func planEditable(req protocol.ItemStackRequest, get func(protocol.StackRequestS
 			destination.after = destination.after.Grow(int(count))
 		}
 		source.after = source.after.Grow(-int(count))
+		source.predicted, destination.predicted = true, true
 	}
 	return true
 }
